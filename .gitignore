@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+.env
+*.pyc
+data/
+models/
+runtime/
+private/
+*.mov
+*.MOV
+*.mp4
+*.safetensors
+*.zip
+*.log
+

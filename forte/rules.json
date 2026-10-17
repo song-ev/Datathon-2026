@@ -1,0 +1,58 @@
+{
+  "version": "2026-10-17.1",
+  "document": "Правила осуществления кассовых операций и операций по инкассации банкнот, монет и ценностей; постановление Правления НБРК от 29.11.2019 № 231",
+  "source_url": "https://adilet.zan.kz/rus/docs/V1900019680",
+  "reference_mirror": "https://adilet.kz/ru/laws/doc-136659/",
+  "reviewed_on": "2026-10-17",
+  "text_kind": "Экспертные краткие формулировки и визуальные условия, не полный текст акта. Точный текст и редакцию проверяйте по официальному источнику.",
+  "rules": [
+    {
+      "id": "leave_client", "paragraph": "22", "title": "Уход кассира до завершения обслуживания",
+      "summary": "Кассовому работнику не допускается покидать рабочее место до окончания обслуживания клиента.",
+      "visual_test": "Cashier clearly leaves the workstation while a customer is still being served and the transaction is unfinished. Standing up, reaching into a nearby drawer, or moving within the workstation is NOT leaving.",
+      "requires": "Visible customer, unfinished transaction, and actual departure from the workstation.", "exceptions": "Do not infer an unfinished transaction just because a person is nearby."
+    },
+    {
+      "id": "cash_storage", "paragraph": "20", "title": "Хранение ранее принятой наличности вне закрытого устройства",
+      "summary": "На рабочем месте находится наличность обслуживаемого клиента; ранее принятая наличность хранится в специальных устройствах, закрывающихся на ключ.",
+      "visual_test": "Previously accepted banknotes remain exposed on the desk after the transaction ends or during service of another customer, or are left in an open storage drawer after handling ends. Current transaction cash on the desk is normal.",
+      "requires": "Cash clearly visible AND evidence it belongs to a completed or different transaction, or a cash storage device clearly left open after use.", "exceptions": "An open drawer while the cashier is actively placing or retrieving cash is normal. A closed drawer cannot be called unlocked from video. Papers and envelopes are not automatically cash."
+    },
+    {
+      "id": "client_presence", "paragraph": "20", "title": "Пересчёт принимаемой наличности без клиента",
+      "summary": "Наличные деньги принимаются и пересчитываются в присутствии клиента.",
+      "visual_test": "Cashier receives a customer's cash, the customer visibly leaves, and the cashier then counts that deposit without the customer present.",
+      "requires": "Visible deposit context and customer departure before counting.", "exceptions": "Internal cash sorting without a customer is not a violation of this paragraph. Out-of-frame customer does not establish absence."
+    },
+    {
+      "id": "deposit_count", "paragraph": "19, подпункт 2", "title": "Приём банкнот без пересчёта",
+      "summary": "Банкноты при приёме пересчитываются полистно с проверкой подлинности и платёжности.",
+      "visual_test": "A complete visible deposit sequence shows received banknotes immediately stored or mixed into bank cash with no manual or machine counting anywhere in that sequence.",
+      "requires": "The whole receive-to-store sequence is visible and no counting occurs.", "exceptions": "A sampled or truncated clip cannot prove counting never happened. Machine counting is valid. Do not judge authenticity sensors from the exterior of a machine."
+    },
+    {
+      "id": "separate_deposits", "paragraph": "21", "title": "Смешивание наличности по разным приходным документам",
+      "summary": "При внесении денег по нескольким приходным документам приём производится по каждому документу отдельно.",
+      "visual_test": "Distinct deposits clearly tied to different cash documents are merged before separate acceptance or counting.",
+      "requires": "Multiple distinct cash documents AND separate deposits visible, not merely several sheets or several denominations.", "exceptions": "Multiple denominations or bundles from one deposit are normal."
+    },
+    {
+      "id": "damaged_bag", "paragraph": "24, подпункты 3–4; 25", "title": "Приём повреждённой инкассаторской сумки без контрольного пересчёта",
+      "summary": "Проверяются целостность и пломбирование сумки; при нарушении целостности сумка вскрывается и пересчитывается в присутствии инкассатора.",
+      "visual_test": "An obviously torn or open collection bag is accepted, the collector leaves, and contents are stored without opening and counting in the collector's presence.",
+      "requires": "Clearly identifiable collection bag, visible damage, complete acceptance sequence and collector departure.", "exceptions": "An ordinary customer's bag is not a collection bag. Small seals or unreadable details cannot establish damage."
+    },
+    {
+      "id": "payout_count", "paragraph": "32", "title": "Выдача банкнот из неполного или повреждённого корешка без пересчёта",
+      "summary": "Банкноты из неполных или повреждённых корешков выдаются полистным пересчётом; для целой упаковки предусмотрена выдача по обозначенной сумме.",
+      "visual_test": "Cashier hands out clearly loose banknotes from an incomplete bundle without any manual or machine counting during the entire visible payout sequence.",
+      "requires": "Complete visible payout, loose or damaged/incomplete bundle and no counting.", "exceptions": "Intact packaging may be issued without individual counting. A short segment cannot establish counting never happened."
+    }
+  ],
+  "cautions": [
+    {"paragraph":"19, подпункт 1; 31, подпункт 1", "text":"Документы могут быть цифровыми. Отсутствие бумажного удостоверения не доказывает отсутствие идентификации. Лица не распознаются."},
+    {"paragraph":"42", "text":"Для контроля пересчёта, сортировки и упаковки предусмотрено исключение при приёме и выдаче наличности клиентам. Один сотрудник в клиентской операции не является самостоятельным нарушением."},
+    {"paragraph":"19, подпункт 6", "text":"Отсутствие видимой бумажной квитанции в коротком фрагменте не доказывает, что документ не выдан."},
+    {"paragraph":"41", "text":"По виду счётчика нельзя установить количество проверяемых машиночитаемых защитных признаков."}
+  ]
+}
