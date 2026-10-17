@@ -79,6 +79,10 @@ def evidence(path, timestamps):
     return result[:3]
 
 
+class UnsupportedScene(ValueError):
+    pass
+
+
 class Engine:
     def __init__(self):
         torch.set_num_threads(4)
@@ -100,11 +104,11 @@ class Engine:
             'Rules:\n' + json.dumps(RULEBOOK['rules'], ensure_ascii=False)
         )
 
-    def infer(self, frames, extra='', tokens=220):
+    def infer(self, frames, extra='', tokens=220, prompt=None):
         content = []
         for t, im in frames:
             content.extend([{'type':'text','text':f't={t:.2f}s'}, {'type':'image','image':im}])
-        content.append({'type':'text','text':self.prompt+'\n'+extra})
+        content.append({'type':'text','text':(self.prompt if prompt is None else prompt)+'\n'+extra})
         inputs = self.processor.apply_chat_template([{'role':'user','content':content}], tokenize=True,
             add_generation_prompt=True, return_dict=True, return_tensors='pt').to('cuda')
         try:
@@ -115,7 +119,7 @@ class Engine:
         finally:
             del inputs
 
-    def analyze(self, path, progress=None, include_evidence=True, time_limit=265):
+    def analyze_rules(self, path, progress=None, include_evidence=True, time_limit=265):
         started = time.monotonic()
         duration = probe(path)
         frames = sample(path)
@@ -169,3 +173,47 @@ class Engine:
                 'json_retries':failures, 'confidence_is_calibrated':False,
                 'limitations':'Автоматическая проверка видимых действий; внекадровые действия и внутренние регламенты не устанавливаются.'},
             '_candidates':merged}
+
+    def analyze(self, path, progress=None, include_evidence=True, time_limit=265):
+        detector_path = Path(os.getenv('FORTE_HOME', '/home/ubuntu/forte-datathon'))/'models/video-detector.joblib'
+        if os.getenv('DETECTOR_MODE', 'trained') == 'rules' or not detector_path.exists():
+            return self.analyze_rules(path, progress, include_evidence, time_limit)
+        import joblib
+        import numpy as np
+        from forte.features import extract, temporal
+        started = time.monotonic()
+        duration = probe(path)
+        if not hasattr(self, 'video_detector'):
+            self.video_detector = joblib.load(detector_path)
+            self.event_detector = joblib.load(detector_path.with_name('event-detector.joblib'))
+        scene_frames = sample(path, step=max(1.0,duration/3))[:3]
+        scene = self.infer(scene_frames, tokens=70, prompt='Decide whether these frames show a real indoor cashier/cash-handling workstation or bank service counter. Do not identify people. A real office counter with a worker is sufficient; cash need not be visible. Return ONLY JSON {"events":[{"cashier_scene":true}]} if yes. For cartoons, geometric shapes, blank images, outdoor scenes or unrelated content return {"events":[]}.')
+        if not any(e.get('cashier_scene') is True for e in scene['events'] if isinstance(e,dict)):
+            raise UnsupportedScene('Видео не содержит поддерживаемую сцену кассового рабочего места')
+        times, vectors = extract(self, path)
+        difference = np.abs(np.diff(vectors, axis=0)).mean(0) if len(vectors)>1 else np.zeros_like(vectors[0])
+        aggregate = np.concatenate([vectors.mean(0), vectors.std(0), difference])[None]
+        score = float(self.video_detector['pipeline'].predict_proba(aggregate)[0,1])
+        positive = score >= self.video_detector['threshold']
+        if progress:
+            progress(20, 'Классификация видео завершена')
+        result = {'verdict':'no_violation', 'violations':[], '_candidates':[], 'analysis':{'duration_sec':round(duration,3),'segments':0}}
+        if positive:
+            result = self.analyze_rules(path, progress, include_evidence, time_limit-(time.monotonic()-started))
+            if not result['violations']:
+                frame_scores = self.event_detector['pipeline'].predict_proba(temporal(vectors))[:,1]
+                t = float(times[int(np.argmax(frame_scores))])
+                result['violations'] = [{'type':'Отклонение в кассовой операции — тип требует проверки',
+                    'timecode_sec':round(t,3),
+                    'description':'Обученный на разметке видеоклассификатор обнаружил признаки нарушения. Конкретное действие и применимый пункт нормы не подтверждены. Время указывает наиболее подозрительный фрагмент; требуется проверка специалистом.',
+                    'evidence_frames':evidence(path,[max(0,t-1),t,min(duration-0.1,t+1)]) if include_evidence else [],
+                    'normative_reference':None, 'confidence':score, 'requires_review':True}]
+            result['verdict'] = 'violation'
+        result['_candidates'] = [{'time_sec':v['timecode_sec'],'confidence':1.0} for v in result['violations']]
+        result['analysis'].update(processing_sec=round(time.monotonic()-started,3),
+            model='Qwen3-VL-4B-Instruct + supervised video classifier',
+            detector_score=score, detector_threshold=self.video_detector['threshold'],
+            classifier_training_groups=24, confidence_is_calibrated=False,
+            rulebook_version=RULEBOOK['version'],
+            limitations='Малый обучающий набор и один ракурс. Неподтверждённый тип и нормативное основание явно отмечаются; решение требует проверки специалистом.')
+        return result

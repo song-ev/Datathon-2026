@@ -41,8 +41,8 @@ if checks['accepted']:
         report=c.get('/api/v1/jobs/'+job_id,headers=h).json()
         if report['status']!='processing':break
         time.sleep(2)
-    checks['synthetic_completed']=report['status']=='done'
-    checks['synthetic_no_violation']=report.get('verdict')=='no_violation' and report.get('violations')==[]
+    checks['synthetic_rejected_as_unsupported']=report['status']=='failed' and report.get('error',{}).get('code')=='UnsupportedScene'
+    checks['synthetic_not_fabricated_violation']=report.get('verdict')!='violation'
 checks['ui']=c.get('/').status_code==200
 checks['security_headers']='nosniff'==c.get('/').headers.get('x-content-type-options')
 result={'checks':checks,'all_passed':all(checks.values()),'seconds':round(time.monotonic()-start,2)}

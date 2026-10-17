@@ -1,0 +1,18 @@
+{
+  "split": "holdout",
+  "n": 16,
+  "tp": 3,
+  "fp": 2,
+  "tn": 6,
+  "fn": 5,
+  "accuracy": 0.5625,
+  "precision": 0.6,
+  "recall": 0.375,
+  "f1": 0.4615,
+  "positive_localization_recall_2s": 0.25,
+  "processed": 16,
+  "max_processing_sec": 11.884,
+  "video_detector_threshold": 0.5,
+  "development_groups": 24,
+  "note": "Types and legal grounding not evaluated; labels contain only binary class and timestamp."
+}

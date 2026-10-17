@@ -49,7 +49,8 @@ def worker(pipe):
                 pipe.send(('result',result))
             except Exception as exc:
                 # Do not leak model output, paths or tracebacks to HTTP clients.
-                pipe.send(('error',{'code':type(exc).__name__, 'message':'Видео не удалось полностью обработать. Проверьте формат или повторите запрос.'}))
+                message = 'Видео не содержит поддерживаемую сцену кассового рабочего места.' if type(exc).__name__=='UnsupportedScene' else 'Видео не удалось полностью обработать. Проверьте формат или повторите запрос.'
+                pipe.send(('error',{'code':type(exc).__name__, 'message':message}))
     except Exception as exc:
         pipe.send(('startup_error',type(exc).__name__))
 
