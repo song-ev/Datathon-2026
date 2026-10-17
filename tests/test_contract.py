@@ -10,6 +10,10 @@ from forte.engine import parse_json,evidence,probe,sample,RULES
 from scripts.evaluate import split_records,metrics
 
 class ContractTests(unittest.TestCase):
+    def test_shell_entrypoints_use_linux_line_endings(self):
+        for path in (Path(__file__).resolve().parents[1]/'scripts').glob('*.sh'):
+            self.assertNotIn(b'\r',path.read_bytes(),str(path))
+
     def test_parse_fenced_json(self):
         self.assertEqual(parse_json('```json\n{"events":[]}\n```'),{'events':[]})
 
