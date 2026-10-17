@@ -9,6 +9,7 @@ import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
+from collections import deque
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, UploadFile, File, Request
@@ -31,6 +32,11 @@ jobs = {}
 lock = threading.RLock()
 state = {'ready':False,'busy':False,'error':None}
 connection = process = None
+pending = deque()
+deadlines = {}
+wake = threading.Condition(lock)
+stopping = threading.Event()
+JOB_SECONDS = 295  # Includes upload, validation and queue wait; 5 s polling margin.
 
 
 def worker(pipe):
@@ -42,9 +48,9 @@ def worker(pipe):
         engine=Engine()
         pipe.send(('ready',None))
         while True:
-            path=pipe.recv()
+            path,budget=pipe.recv()
             try:
-                result=engine.analyze(path,progress=lambda p,s:pipe.send(('progress',{'progress':p,'stage':s})))
+                result=engine.analyze(path,time_limit=budget,progress=lambda p,s:pipe.send(('progress',{'progress':p,'stage':s})))
                 result.pop('_candidates',None)
                 pipe.send(('result',result))
             except Exception as exc:
@@ -77,10 +83,11 @@ def save_job(job):
 
 
 def execute_job(job_id,path):
-    started=time.monotonic()
     try:
-        connection.send(str(path))
-        while time.monotonic()-started < 280:
+        remaining=deadlines[job_id]-time.monotonic()
+        if remaining<=0:raise TimeoutError('Queue deadline exceeded')
+        connection.send((str(path),min(265,max(1,remaining-2))))
+        while time.monotonic() < deadlines[job_id]:
             if not process.is_alive():raise RuntimeError('GPU worker stopped')
             if not connection.poll(0.3):continue
             kind,payload=connection.recv()
@@ -88,18 +95,54 @@ def execute_job(job_id,path):
                 job=jobs[job_id]
                 if kind=='progress':job.update(payload)
                 elif kind=='result':
-                    job.update(payload,status='done',progress=100,stage='Готово');save_job(job);return
+                    if time.monotonic()>=deadlines[job_id]:raise TimeoutError('Processing deadline exceeded')
+                    job.update(payload,status='done',progress=100,stage='Готово',finished_at=time.time());save_job(job);return
                 elif kind=='error':
-                    job.update(status='failed',error=payload,stage='Ошибка обработки');save_job(job);return
+                    job.update(status='failed',error=payload,stage='Ошибка обработки',finished_at=time.time());save_job(job);return
         raise TimeoutError('Processing deadline exceeded')
     except Exception as exc:
         with lock:
-            jobs[job_id].update(status='failed',stage='Обработка остановлена',error={'code':type(exc).__name__,'message':'Превышен лимит времени или остановлен GPU-процесс.'})
+            jobs[job_id].update(status='failed',stage='Обработка остановлена',finished_at=time.time(),error={'code':type(exc).__name__,'message':'Превышен общий лимит времени, включая очередь, или остановлен GPU-процесс.'})
             save_job(jobs[job_id])
         if process.is_alive():process.terminate();process.join(5)
-        launch_worker()
+        if not stopping.is_set():launch_worker()
     finally:
-        with lock:state['busy']=False
+        with lock:
+            state['busy']=False
+            deadlines.pop(job_id,None)
+
+
+def expire_pending(now=None):
+    """Called under lock; never consume messages belonging to the active worker."""
+    now=time.monotonic() if now is None else now
+    for job_id,path in list(pending):
+        if now>=deadlines[job_id]:
+            pending.remove((job_id,path))
+            job=jobs[job_id]
+            job.update(status='failed',stage='Истёк срок ожидания',finished_at=time.time(),
+                       error={'code':'TimeoutError','message':'Общий лимит времени истёк в очереди.'})
+            save_job(job)
+            deadlines.pop(job_id,None)
+
+
+def deadline_loop():
+    while not stopping.wait(0.25):
+        with lock:expire_pending()
+
+
+def dispatch_loop():
+    # Exactly one dispatcher owns the GPU pipe, including worker restarts.
+    launch_worker()
+    while not stopping.is_set():
+        with wake:
+            expire_pending()
+            if not pending or not state['ready']:
+                wake.wait(0.25)
+                continue
+            job_id,path=pending.popleft()
+            state['busy']=True
+            jobs[job_id].update(stage='Подготовка кадров',started_at=time.time())
+        execute_job(job_id,path)
 
 
 def cleanup():
@@ -118,6 +161,7 @@ def retention_loop():
 
 @asynccontextmanager
 async def lifespan(app):
+    stopping.clear()
     for path in RUNTIME.glob('*.json'):
         try:
             job=json.loads(path.read_text(encoding='utf8'))
@@ -128,8 +172,10 @@ async def lifespan(app):
         except (ValueError,KeyError):pass
     cleanup()
     threading.Thread(target=retention_loop,daemon=True).start()
-    startup=threading.Thread(target=launch_worker,daemon=True);startup.start()
+    threading.Thread(target=deadline_loop,daemon=True).start()
+    threading.Thread(target=dispatch_loop,daemon=True).start()
     yield
+    stopping.set()
     if process and process.is_alive():process.terminate();process.join(5)
 
 
@@ -139,6 +185,8 @@ app.mount('/static',StaticFiles(directory=STATIC),name='static')
 
 @app.middleware('http')
 async def headers(request:Request,call_next):
+    request.state.received_at=time.time()
+    request.state.deadline=time.monotonic()+JOB_SECONDS
     if request.method=='POST':
         try:
             if int(request.headers.get('content-length','0'))>MAX_BYTES+1024*1024:
@@ -164,7 +212,8 @@ def index():return FileResponse(STATIC/'index.html')
 
 @app.get('/healthz')
 @app.get('/api/v1/health')
-def health():return {'status':'ready' if state['ready'] else 'loading','busy':state['busy'],'model':'local'}
+def health():
+    with lock:return {'status':'ready' if state['ready'] else 'loading','busy':state['busy'],'queue_length':len(pending),'model':'local'}
 
 
 @app.get('/api/v1/rules',dependencies=[Depends(authorize)])
@@ -177,8 +226,6 @@ async def analyze(request:Request,file:UploadFile=File(...)):
         raise HTTPException(415,'Загрузите видео в формате .mov')
     with lock:
         if not state['ready']:raise HTTPException(503,'Модель загружается; повторите запрос через минуту')
-        if state['busy']:raise HTTPException(429,'GPU обрабатывает другое видео. Повторите запрос после завершения.',headers={'Retry-After':'15'})
-        state['busy']=True
     job_id=uuid.uuid4().hex
     path=RUNTIME/(job_id+'.mov')
     try:
@@ -198,13 +245,16 @@ async def analyze(request:Request,file:UploadFile=File(...)):
                 d=float(s.duration*s.time_base) if s.duration else float(c.duration or 0)/av.time_base
                 if not 0<d<=180 or s.width*s.height>3840*2160:raise ValueError()
         except Exception:raise HTTPException(422,'Нужен читаемый MOV длительностью до 180 секунд и разрешением до 4K')
-        job={'job_id':job_id,'status':'processing','progress':0,'stage':'Подготовка кадров','created_at':time.time()}
-        with lock:jobs[job_id]=job;save_job(job)
-        threading.Thread(target=execute_job,args=(job_id,path),daemon=True).start()
+        job={'job_id':job_id,'status':'processing','progress':0,'stage':'Ожидание в очереди','created_at':request.state.received_at}
+        with wake:
+            save_job(job)
+            jobs[job_id]=job
+            deadlines[job_id]=request.state.deadline
+            pending.append((job_id,path))
+            wake.notify()
         return {'job_id':job_id}
     except BaseException:
         path.unlink(missing_ok=True)
-        with lock:state['busy']=False
         raise
     finally:await file.close()
 
@@ -215,4 +265,6 @@ def get_job(job_id:str):
     with lock:
         job=jobs.get(job_id)
         if job is None:raise HTTPException(404,'Задание не найдено')
-        return job.copy()
+        result=job.copy()
+        result['queue_position']=next((i for i,(jid,_) in enumerate(pending,1) if jid==job_id),0)
+        return result
